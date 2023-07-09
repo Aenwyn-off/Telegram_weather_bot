@@ -7,6 +7,8 @@ from settings import bot_config
 from api_requests import request
 from database import orm
 
+import math
+
 bot = Bot(token=bot_config.bot_token)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
@@ -26,9 +28,50 @@ async def city_chosen(message: types.Message, state: FSMContext):
     markup = await main_menu()
     city = await state.get_data()
     data = request.get_weather(city.get('waiting_city'))
+    orm.create_report(message.from_user.id, data["temp"], data["feels_like"], data["wind_speed"], data["pressure_mm"],
+                      city.get('waiting_city'))
     text = f'Погода в {city.get("waiting_city")}\nТемпература: {data["temp"]} C\n Ощущается как: {data["feels_like"]} C \nСкорость ветра: {data["wind_speed"]}м/с\nДавление: {data["pressure_mm"]}мм'
     await message.answer(text, reply_markup=markup)
     await state.finish()
+
+
+@dp.message_handler(regexp= 'История')
+async def get_reports(message: types.Message):
+    current_page = 1
+    reports = orm.get_reports(message.from_user.id)
+    total_pages = math.ceil(len(reports) / 4)
+    text = 'История запросов:'
+    inline_markup = types.InlineKeyboardMarkup()
+    for report in reports[:current_page*4]:
+        inline_markup.add(types.InlineKeyboardButton(
+            text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+            callback_data=f'report_{report.id}'
+        ))
+    current_page += 1
+    inline_markup.row(
+        types.InlineKeyboardButton(text=f'{current_page-1}/{total_pages}', callback_data='None'),
+        types.InlineKeyboardButton(text='Вперёд', callback_data=f'next_{current_page}')
+    )
+    await message.answer(text, reply_markup=inline_markup)
+
+
+@dp.message_handler(regexp='Погода в моём городе')
+async def get_user_city_weather(message: types.Message):
+    markup = types.reply_keyboard.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    btn1 = types.KeyboardButton('Меню')
+    markup.add(btn1)
+    city = orm.get_user_city(message.from_user.id)
+    if city is None:
+        text = 'Пожалуйста установите город проживания'
+        markup = types.reply_keyboard.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+        btn1 = types.KeyboardButton('Установить свой город')
+        markup.add(btn1)
+        await message.answer(text, reply_markup=markup)
+        return
+    data = request.get_weather(city)
+    orm.create_report(message.from_user.id, data["temp"], data["feels_like"], data["wind_speed"], data["pressure_mm"], city)
+    text = f'Погода в {city}\nТемпература: {data["temp"]} C\nОщущается как: {data["feels_like"]} C \nСкорость ветра: {data["wind_speed"]}м/с\nДавление: {data["pressure_mm"]}мм'
+    await message.answer(text, reply_markup=markup)
 
 
 @dp.message_handler(regexp='Погода в другом месте')
@@ -76,6 +119,126 @@ async def start_message(message: types.Message):
     text = f'Привет {message.from_user.first_name}, я бот, который расскажет тебе о погоде на сегодня'
     await message.answer(text, reply_markup=markup)
 
+
+@dp.callback_query_handler(lambda call: True)
+async def callback_query(call, state: FSMContext):
+    query_type = call.data.split('_')[0]
+    if query_type == 'delete' and call.data.split('_')[1] == 'report':
+        report_id = call.data.split('_')[2]
+        orm.delete_user_report(report_id)
+        current_page = 0
+        reports = orm.get_reports(call.from_user.id)
+        total_pages = math.ceil(len(reports) / 4)
+        text = 'История запросов:'
+        inline_markup = types.InlineKeyboardMarkup()
+        for report in reports[current_page * 4:(current_page + 1) * 4]:
+            inline_markup.add(types.InlineKeyboardButton(
+                text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+                callback_data=f'report_{report.id}'
+            ))
+        btns = [types.InlineKeyboardButton(text=f'{current_page + 1}/{total_pages}', callback_data='None')]
+        if len(reports) > 4:
+            btns.append(types.InlineKeyboardButton(text='Вперёд', callback_data=f'next_{current_page}'))
+        inline_markup.row(*btns)
+        await state.update_data(current_page=current_page)
+        await call.message.edit_text(text, reply_markup=inline_markup)
+    async with state.proxy() as data:
+        data['current_page'] = int(call.data.split('_')[1])
+        await state.update_data(current_page=data['current_page'])
+        if query_type == 'next':
+            reports = orm.get_reports(call.from_user.id)
+            total_pages = math.ceil(len(reports) / 4)
+            inline_markup = types.InlineKeyboardMarkup()
+            if data['current_page']*4 >= len(reports):
+                for report in reports[data['current_page']*4-4:len(reports) + 1]:
+                    inline_markup.add(types.InlineKeyboardButton(
+                    text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+                    callback_data=f'report_{report.id}'
+                    ))
+                data['current_page'] -= 1
+                inline_markup.row(
+                    types.InlineKeyboardButton(text='Назад', callback_data=f'prev_{data["current_page"]}'),
+                    types.InlineKeyboardButton(text=f'{data["current_page"]+1}/{total_pages}', callback_data='None')
+                )
+                await call.message.edit_text(text="История запросов:", reply_markup=inline_markup)
+                return
+            for report in reports[data['current_page']*4-4:data['current_page']*4]:
+                inline_markup.add(types.InlineKeyboardButton(
+                text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+                callback_data=f'report_{report.id}'
+            ))
+            data['current_page'] += 1
+            inline_markup.row(
+                types.InlineKeyboardButton(text='Назад', callback_data=f'prev_{data["current_page"]-2}'),
+                types.InlineKeyboardButton(text=f'{data["current_page"]-1}/{total_pages}', callback_data='None'),
+                types.InlineKeyboardButton(text='Вперёд', callback_data=f'next_{data["current_page"]}')
+            )
+            await call.message.edit_text(text="История запросов:", reply_markup=inline_markup)
+        if query_type == 'prev':
+            reports = orm.get_reports(call.from_user.id)
+            total_pages = math.ceil(len(reports) / 4)
+            inline_markup = types.InlineKeyboardMarkup()
+            if data['current_page'] == 1:
+                for report in reports[0:data['current_page']*4]:
+                    inline_markup.add(types.InlineKeyboardButton(
+                    text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+                    callback_data=f'report_{report.id}'
+                    ))
+                data['current_page'] += 1
+                inline_markup.row(
+                    types.InlineKeyboardButton(text=f'{data["current_page"]-1}/{total_pages}', callback_data='None'),
+                    types.InlineKeyboardButton(text='Вперёд', callback_data=f'next_{data["current_page"]}')
+                )
+                await call.message.edit_text(text="История запросов:", reply_markup=inline_markup)
+                return
+            for report in reports[data['current_page']*4-4:data['current_page']*4]:
+                inline_markup.add(types.InlineKeyboardButton(
+                text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+                callback_data=f'report_{report.id}'
+                ))
+            data['current_page'] -= 1
+            inline_markup.row(
+                types.InlineKeyboardButton(text='Назад', callback_data=f'prev_{data["current_page"]}'),
+                types.InlineKeyboardButton(text=f'{data["current_page"]+1}/{total_pages}', callback_data='None'),
+                types.InlineKeyboardButton(text='Вперёд', callback_data=f'next_{data["current_page"]}'),
+            )
+            await call.message.edit_text(text="История запросов:", reply_markup=inline_markup)
+        if query_type == 'report':
+            reports = orm.get_reports(call.from_user.id)
+            report_id = call.data.split('_')[1]
+            inline_markup = types.InlineKeyboardMarkup()
+            for report in reports:
+                if report.id == int(report_id):
+                    inline_markup.add(
+                        types.InlineKeyboardButton(text='Назад', callback_data=f'reports_{data["current_page"]}'),
+                        types.InlineKeyboardButton(text='Удалить запрос', callback_data=f'delete_report_{report_id}')
+                    )
+                    await call.message.edit_text(
+                        text=f'Данные по запросу\n'
+                             f'Город:{report.city}\n'
+                             f'Температура:{report.temp}\n'
+                             f'Ощущается как:{report.feels_like}\n'
+                             f'Скорость ветра:{report.wind_speed}\n'
+                             f'Давление:{report.pressure_mm}',
+                        reply_markup=inline_markup
+                    )
+                    break
+        if query_type == 'reports':
+            reports = orm.get_reports(call.from_user.id)
+            total_pages = math.ceil(len(reports) / 4)
+            inline_markup = types.InlineKeyboardMarkup()
+            data['current_page'] = 1
+            for report in reports[:data['current_page'] * 4]:
+                inline_markup.add(types.InlineKeyboardButton(
+                    text=f'{report.city} {report.date.day}.{report.date.month}.{report.date.year}',
+                    callback_data=f'report_{report.id}'
+                ))
+            data['current_page'] += 1
+            inline_markup.row(
+                types.InlineKeyboardButton(text=f'{data["current_page"] - 1}/{total_pages}', callback_data='None'),
+                types.InlineKeyboardButton(text='Вперёд', callback_data=f'next_{data["current_page"]}')
+            )
+            await call.message.edit_text(text='История запросов:', reply_markup=inline_markup)
 
 async def main_menu():
     markup = types.reply_keyboard.ReplyKeyboardMarkup(row_width=2)
