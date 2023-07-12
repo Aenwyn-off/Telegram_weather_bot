@@ -60,9 +60,7 @@ async def get_reports(message: types.Message):
 
 @dp.message_handler(regexp='Погода в моём городе')
 async def get_user_city_weather(message: types.Message):
-    markup = types.reply_keyboard.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    btn1 = types.KeyboardButton('Меню')
-    markup.add(btn1)
+    markup = await main_menu()
     city = orm.get_user_city(message.from_user.id)
     if city is None:
         text = 'Пожалуйста установите город проживания'
