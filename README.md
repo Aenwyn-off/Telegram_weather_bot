@@ -6,8 +6,8 @@ It uses Yandex API weather data (https://developer.tech.yandex.ru/)
 The bot implements:
 - Binding of the city to the user, and weather browsing;
 - Weather display in any other city;
-- Saving the history of weather requests and output for the user.
-- Admin panel
+- Saving the history of weather requests and output for the user;
+- Admin commands.
 
 Bot link: https://t.me/Weather_pracbot (Not deployed yet.)
 
