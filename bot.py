@@ -2,14 +2,17 @@ from aiogram import Bot, Dispatcher, types, executor
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from dotenv import load_dotenv, find_dotenv
 
-from settings import bot_config
+
 from api_requests import request
 from database import orm
-
 import math
+from os import getenv
 
-bot = Bot(token=bot_config.bot_token)
+load_dotenv(find_dotenv())
+
+bot = Bot(token=getenv('BOT_TOKEN'))
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
@@ -241,7 +244,7 @@ async def callback_query(call, state: FSMContext):
             await call.message.edit_text(text='История запросов:', reply_markup=inline_markup)
 
 
-@dp.message_handler(lambda message: message.from_user.id in bot_config.tg_bot_admin and message.text == 'Администратор')
+@dp.message_handler(lambda message: str(message.from_user.id) in getenv('TG_BOT_ADMIN') and message.text == 'Администратор')
 async def admin_panel(message: types.Message):
     markup = types.reply_keyboard.ReplyKeyboardMarkup(resize_keyboard=True)
     btn1 = types.KeyboardButton('Список пользователей')
@@ -250,7 +253,7 @@ async def admin_panel(message: types.Message):
     await message.answer(text, reply_markup=markup)
 
 
-@dp.message_handler(lambda message: message.from_user.id in bot_config.tg_bot_admin and message.text == 'Список пользователей')
+@dp.message_handler(lambda message: str(message.from_user.id) in getenv('TG_BOT_ADMIN') and message.text == 'Список пользователей')
 async def get_all_users(message: types.Message):
     current_page = 1
     users = orm.get_all_users()

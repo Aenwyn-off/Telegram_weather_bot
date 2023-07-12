@@ -1,13 +1,16 @@
+from dotenv import load_dotenv, find_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from .models import Base, User, WeatherReport
 
-from settings import database_config
+from os import getenv
 
-engine = create_engine(database_config.url, echo=True)
+
+engine = create_engine(getenv('URL'), echo=True)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 
+load_dotenv(find_dotenv())
 
 def add_user(tg_id):
     session = Session()
@@ -51,3 +54,9 @@ def delete_user_report(report_id):
     report = session.get(WeatherReport, report_id)
     session.delete(report)
     session.commit()
+
+
+def get_all_users():
+    session = Session()
+    users = session.query(User).all()
+    return users
