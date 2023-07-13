@@ -26,7 +26,7 @@ Bot link: https://t.me/Weather_pracbot (Not deployed yet.)
 
 ### :hammer_and_wrench: Installation:
 1. $ pip install -r requirements.txt
-2. Add the following variables to the **.env** environment, to work with the python_dotenv library:
+2. Create **.env** file in your project directory and add the following variables to the **.env** environment, to work with the python_dotenv library:
   
        - GEO_KEY = <Api key from Yanex.Geocoder>
        - WEATHER_KEY = <Api key from Yanex.Weather>
